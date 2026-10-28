@@ -10,8 +10,8 @@ run_worker_first = true
 [[d1_databases]]
 binding = "DB"
 database_name = "hot-potato-arena"
-# Replace with the id printed by `npx wrangler d1 create hot-potato-arena` before the first deploy.
-database_id = "00000000-0000-0000-0000-000000000000"
+# The hot-potato-arena D1 database in the Cloudflare account.
+database_id = "9d4d3c26-4566-4f41-86ab-aabdc4b74377"
 # Tables are created by the Worker itself on first request (src/migrate.js).
 
 [[rules]]
