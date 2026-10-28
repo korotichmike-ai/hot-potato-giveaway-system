@@ -62,6 +62,14 @@ ul.ents li.rej{color:var(--muted)}
 .tag.s{color:var(--gold)}
 .tag.r{color:var(--bad);text-transform:none;letter-spacing:0;font-weight:500;text-align:right;white-space:normal}
 .mono{font:400 13px/1.5 var(--f-mono);color:var(--muted);overflow-wrap:anywhere}
+.btn{display:flex;align-items:center;justify-content:center;text-decoration:none;font:700 17px var(--f-body);border-radius:10px;padding:14px 18px;min-height:52px;background:var(--ember);color:#1b0d03}
+.btn:focus-visible,summary:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+summary{cursor:pointer;color:var(--muted);font-size:14px}
+.chat{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px;font-size:14px;padding:10px 12px;border-radius:8px;background:var(--ink);border:1px solid var(--rule)}
+.chat.ok{color:var(--clover)}
+.chat.warn{color:var(--gold)}
+.chat.bad{color:var(--bad)}
+.who{font-size:14px;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -71,13 +79,19 @@ ul.ents li.rej{color:var(--muted)}
     <span class="pill" id="pill" hidden></span>
   </header>
 
-  <form class="panel" id="login" hidden>
+  <section class="panel" id="login" hidden>
     <h2>Sign in</h2>
-    <label for="hostkey">Host key<input id="hostkey" type="password" autocomplete="current-password" required></label>
-    <button class="primary" type="submit">Open the panel</button>
-    <p class="hint">The host key is set on the server. Kick login replaces it in a later update.</p>
+    <a class="btn" id="kicklogin" href="/api/auth/login?role=host" hidden>Log in with Kick</a>
+    <p class="hint" id="kickhint"></p>
+    <details id="keydetails" hidden>
+      <summary>Use the host key instead</summary>
+      <form id="keyform" style="display:grid;gap:10px;margin-top:10px">
+        <label for="hostkey">Host key<input id="hostkey" type="password" autocomplete="current-password" required></label>
+        <button type="submit">Open the panel</button>
+      </form>
+    </details>
     <p class="err" id="loginerr" hidden></p>
-  </form>
+  </section>
 
   <div id="app" hidden style="display:grid;gap:14px">
     <section class="panel" id="main" aria-live="polite"></section>
@@ -96,6 +110,7 @@ ul.ents li.rej{color:var(--muted)}
 
     <section class="panel" id="entbox" hidden>
       <h2>Entrants</h2>
+      <div class="chat" id="chat" hidden><span id="chattext"></span><button class="small" type="button" id="reconnect" hidden>Reconnect chat</button></div>
       <div class="stats" id="entstats"></div>
       <div class="row" id="testrow" hidden>
         <button class="small" type="button" id="test10">+10 test viewers</button>
@@ -112,6 +127,7 @@ ul.ents li.rej{color:var(--muted)}
       </div>
       <p class="hint">Add the overlay link in OBS as a Browser Source, 1920 × 1080. Keep it off screen when you copy it, because it contains the overlay key.</p>
       <p class="mono" id="verifylink" hidden></p>
+      <p class="who" id="who" hidden></p>
       <button class="link" type="button" id="signout">Sign out of this device</button>
     </section>
   </div>
@@ -124,7 +140,7 @@ const store = {
   set(v) { try { v ? localStorage.setItem('hp-host-key', v) : localStorage.removeItem('hp-host-key'); } catch {} },
 };
 let key = store.get();
-let state = null, clockOffset = 0, busy = false, replacing = false;
+let state = null, clockOffset = 0, busy = false, replacing = false, signedIn = false;
 const now = () => Date.now() + clockOffset;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const mmss = ms => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
@@ -132,32 +148,36 @@ const mmss = ms => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math
 async function call(path, body) {
   const res = await fetch('/api/host' + path, {
     method: body === undefined ? 'GET' : 'POST',
-    headers: { authorization: 'Bearer ' + key, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
+    headers: { 'x-hp': '1', ...(key ? { authorization: 'Bearer ' + key } : {}), ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
     body: body === undefined ? undefined : JSON.stringify(body),
     cache: 'no-store',
   });
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401) { signOut('That host key was not accepted.'); throw new Error('Signed out'); }
+  if (res.status === 401) { showLogin(key ? 'That host key was not accepted.' : (signedIn ? 'Your login expired. Log in again.' : '')); throw new Error('Signed out'); }
   if (!res.ok) throw new Error(data.error || 'The server did not respond. Check your connection and try again.');
   return data;
 }
 
-function signOut(message) {
-  key = ''; store.set(''); state = null;
+function showLogin(message) {
+  key = ''; store.set(''); state = null; signedIn = false;
   $('app').hidden = true; $('pill').hidden = true; $('login').hidden = false;
   $('loginerr').textContent = message || ''; $('loginerr').hidden = !message;
 }
 
+async function signOut() {
+  await fetch('/api/auth/logout', { method: 'POST', headers: { 'x-hp': '1' } }).catch(() => {});
+  showLogin('');
+}
+
 async function refresh() {
-  if (!key) return;
   try {
     const s = await call('/state');
     clockOffset = s.now - Date.now();
-    state = s;
+    state = s; signedIn = true;
     $('login').hidden = true; $('app').hidden = false;
     render();
   } catch (e) {
-    if (e.message !== 'Signed out') showError(e.message);
+    if (e.message !== 'Signed out') { if (signedIn) showError(e.message); else showLogin(e.message); }
   }
 }
 
@@ -252,9 +272,31 @@ function render() {
   $('testrow').hidden = !(state.testEntrantsAllowed && g?.status === 'open');
   $('ents').innerHTML = [...ents].reverse().map(e => `<li class="${e.rejectedReason ? 'rej' : ''}"><span>${esc(e.username)}</span>${e.rejectedReason ? `<span class="tag r">${esc(e.rejectedReason)}</span>` : e.isSub ? '<span class="tag s">🍀 Sub</span>' : ''}</li>`).join('') || '<li class="rej"><span>No entries yet</span></li>';
 
+  renderChat(g);
+  $('who').hidden = !state.user;
+  if (state.user) $('who').textContent = `Logged in with Kick as ${state.user.username}.`;
+
   const showVerify = g && g.seedHash;
   $('verifylink').hidden = !showVerify;
   if (showVerify) $('verifylink').textContent = 'Verify page: ' + g.verifyUrl;
+}
+
+function renderChat(g) {
+  const k = state.kick, box = $('chat'), text = $('chattext');
+  let cls = '', msg = '', reconnect = false;
+  if (!k.loginEnabled) { msg = 'Kick chat is not set up on the server yet, so only test viewers can join.'; cls = 'warn'; }
+  else if (!k.broadcaster) { msg = `Log in with Kick as ${k.channel || 'the streamer'} once to connect chat.`; cls = 'warn'; }
+  else if (g?.status === 'open') {
+    if (k.chatError) { msg = 'Could not connect to Kick chat: ' + k.chatError; cls = 'bad'; reconnect = true; }
+    else if (!k.chatListening) { msg = 'Not listening to chat.'; cls = 'bad'; reconnect = true; }
+    else {
+      const since = now() - Math.max(k.lastChatAt || 0, g.openedAt || 0);
+      if (since > 60000) { msg = 'No chat messages have arrived for a minute. Check the webhook URL in the Kick app settings.'; cls = 'warn'; reconnect = true; }
+      else { msg = `Listening to ${k.broadcaster}'s chat for !join`; cls = 'ok'; }
+    }
+  } else { msg = `Chat connects to ${k.broadcaster} when entries open.`; }
+  box.hidden = !g || !['draft', 'open', 'locked'].includes(g.status);
+  box.className = 'chat ' + cls; text.textContent = msg; $('reconnect').hidden = !reconnect;
 }
 
 function newForm(compact) {
@@ -275,13 +317,16 @@ setInterval(() => {
   if (target) el.textContent = mmss(target - now());
 }, 250);
 
-$('login').addEventListener('submit', e => {
+$('keyform').addEventListener('submit', e => {
   e.preventDefault();
   key = $('hostkey').value.trim();
   $('hostkey').value = '';
   store.set(key);
   refresh();
 });
+$('reconnect').onclick = async () => {
+  try { state = await call('/chat/reconnect', {}); render(); } catch (e) { if (e.message !== 'Signed out') showError(e.message); }
+};
 $('prizeform').addEventListener('submit', async e => {
   e.preventDefault();
   const link = $('prize').value.trim();
@@ -302,8 +347,17 @@ $('copyoverlay').onclick = async () => {
 };
 $('openpreview').onclick = () => { if (state?.overlayUrl) window.open(state.overlayUrl + '&preview=1', '_blank', 'noopener'); };
 
-if (key) { refresh(); } else { $('login').hidden = false; }
-setInterval(() => { if (!busy && document.visibilityState === 'visible') refresh(); }, 1500);
+const params = new URLSearchParams(location.search);
+const urlError = params.get('error');
+if (urlError) history.replaceState(null, '', location.pathname);
+fetch('/api/config').then(r => r.json()).then(c => {
+  $('kicklogin').hidden = !c.kickLogin;
+  $('keydetails').hidden = !c.hostKeyLogin;
+  if (!c.kickLogin) $('keydetails').open = true;
+  $('kickhint').textContent = c.kickLogin ? `Only the ${c.channel || 'channel owner'}'s Kick account can open this panel.` : 'Kick login is not set up on the server yet.';
+}).catch(() => {});
+refresh().then(() => { if (!signedIn && urlError) { $('loginerr').textContent = urlError; $('loginerr').hidden = false; } });
+setInterval(() => { if (signedIn && !busy && document.visibilityState === 'visible') refresh(); }, 1500);
 </script>
 </body>
 </html>

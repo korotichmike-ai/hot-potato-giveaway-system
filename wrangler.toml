@@ -1,4 +1,4 @@
-name = "hot-potato-arena"
+name = "hot-potato-giveaway-system"
 main = "src/worker.js"
 compatibility_date = "2026-10-01"
 
@@ -12,7 +12,12 @@ binding = "DB"
 database_name = "hot-potato-arena"
 # Replace with the id printed by `npx wrangler d1 create hot-potato-arena` before the first deploy.
 database_id = "00000000-0000-0000-0000-000000000000"
-migrations_dir = "migrations"
+# Tables are created by the Worker itself on first request (src/migrate.js).
+
+[[rules]]
+type = "Text"
+globs = ["**/*.sql"]
+fallthrough = true
 
 [vars]
 CHANNEL_ID = "default"
@@ -24,10 +29,15 @@ SUB_WEIGHT = "3"
 # Rehearsal button in the host panel. Set to "false" once real Kick chat entries work.
 ALLOW_TEST_ENTRANTS = "true"
 # Comma-separated Kick user ids or usernames that can never enter (bots etc.).
-BLOCKLIST = ""
-BROADCASTER_USER_ID = ""
+BLOCKLIST = "botrix,kickbot"
+# The streamer's Kick channel (as in kick.com/<slug>). Only this account can log in to the host panel.
+KICK_CHANNEL_SLUG = ""
+# Public address of the site, e.g. "https://potato.example.com". Leave empty to use the request's own address.
+# Kick app settings must use <PUBLIC_URL>/api/auth/callback as the redirect URL and <PUBLIC_URL>/api/kick/webhook as the webhook URL.
+PUBLIC_URL = ""
 
 # Secrets (set with `npx wrangler secret put NAME`, or in .dev.vars for local dev):
-#   HOST_KEY      password for the host panel until Kick login arrives in phase 4
-#   OVERLAY_KEY   key in the OBS overlay link
-#   PRIZE_KEY     32 random bytes, base64 (encrypts prize links)
+#   HOST_KEY      optional backup password for the host panel (Kick login is the normal way in)
+#   OVERLAY_KEY   key in the OBS overlay link (any long random text)
+#   PRIZE_KEY     encrypts prize links (any long random text, 16+ characters; never change it mid-giveaway)
+#   KICK_CLIENT_ID, KICK_CLIENT_SECRET   from the streamer's app at kick.com/settings/developer

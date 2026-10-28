@@ -4,12 +4,11 @@
   "description": "Hot Potato Arena: provably fair Kick giveaway overlay",
   "scripts": {
     "dev": "wrangler dev",
-    "db:migrate:local": "wrangler d1 migrations apply DB --local",
-    "db:migrate": "wrangler d1 migrations apply DB --remote",
     "deploy": "wrangler deploy",
     "test": "node --test test/draw.test.mjs",
     "test:quick": "ROUNDS=20000 node --test test/draw.test.mjs",
-    "e2e": "node test/e2e.mjs"
+    "e2e": "node test/e2e.mjs",
+    "e2e:kick": "node test/e2e-kick.mjs"
   },
   "keywords": [],
   "author": "",
