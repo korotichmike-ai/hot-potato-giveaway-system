@@ -1,0 +1,33 @@
+name = "hot-potato-arena"
+main = "src/worker.js"
+compatibility_date = "2026-10-01"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "hot-potato-arena"
+# Replace with the id printed by `npx wrangler d1 create hot-potato-arena` before the first deploy.
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[vars]
+CHANNEL_ID = "default"
+# Shown on the winner card, e.g. "potato.example.com". Leave empty to use the overlay's own host.
+CLAIM_SITE = ""
+DEFAULT_ENTRY_SECONDS = "45"
+DEFAULT_CLAIM_SECONDS = "120"
+SUB_WEIGHT = "3"
+# Rehearsal button in the host panel. Set to "false" once real Kick chat entries work.
+ALLOW_TEST_ENTRANTS = "true"
+# Comma-separated Kick user ids or usernames that can never enter (bots etc.).
+BLOCKLIST = ""
+BROADCASTER_USER_ID = ""
+
+# Secrets (set with `npx wrangler secret put NAME`, or in .dev.vars for local dev):
+#   HOST_KEY      password for the host panel until Kick login arrives in phase 4
+#   OVERLAY_KEY   key in the OBS overlay link
+#   PRIZE_KEY     32 random bytes, base64 (encrypts prize links)

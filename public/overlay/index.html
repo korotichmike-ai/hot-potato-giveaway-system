@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hot Potato Overlay</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bungee&family=Figtree:wght@600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+  /* OBS browser source: 1920x1080, transparent background. */
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; object-fit: contain; }
+  #msg { position: fixed; left: 16px; bottom: 16px; font: 600 16px/1.4 system-ui, sans-serif; color: #fff; background: rgba(160, 30, 30, .85); padding: 8px 12px; border-radius: 6px; }
+</style>
+</head>
+<body>
+<canvas id="cv" aria-label="Hot Potato giveaway overlay"></canvas>
+<div id="msg" hidden></div>
+<script type="module">
+import { createArena } from '/js/arena.js';
+
+const params = new URLSearchParams(location.search);
+const key = params.get('key') || '';
+const msg = document.getElementById('msg');
+let clockOffset = 0;
+const now = () => Date.now() + clockOffset;
+const CARD_MS = 9000;
+
+async function fontsReady() {
+  if (!document.fonts) return;
+  const loads = ['56px Bungee', '700 30px Figtree', '400 22px "JetBrains Mono"'].map(f => document.fonts.load(f));
+  await Promise.race([Promise.all(loads), new Promise(r => setTimeout(r, 2000))]).catch(() => {});
+}
+
+await fontsReady();
+const arena = createArena(document.getElementById('cv'), {
+  now,
+  backdrop: params.has('preview'),
+  potato: params.get('potato') || '🥔',
+  reducedMotion: params.has('calm'),
+});
+window.__arena = arena;
+
+let playedKey = null;
+async function poll() {
+  try {
+    const res = await fetch('/api/overlay/state?key=' + encodeURIComponent(key), { cache: 'no-store' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'The overlay could not reach the server.');
+    clockOffset = data.now - Date.now();
+    msg.hidden = true;
+    const g = data.giveaway;
+    if (!g) { arena.setBanner(null); return; }
+    if (g.status === 'open' && now() < g.entriesCloseAt) arena.setBanner({ kind: 'entries', count: g.count, closesAt: g.entriesCloseAt, subWeight: g.subWeight });
+    else if (g.status === 'open' || g.status === 'locked') arena.setBanner({ kind: 'locked', count: g.count });
+    else arena.setBanner(null);
+
+    if (g.round) {
+      const roundKey = g.id + ':' + g.nonce;
+      const elapsed = now() - g.launchedAt;
+      if (playedKey !== roundKey) {
+        playedKey = roundKey;
+        if (elapsed < g.roundMs + CARD_MS) {
+          await arena.play({
+            ...g.round, key: roundKey, id: g.id,
+            seedHash: g.seedHash, seed: g.seed, subWeight: g.subWeight,
+            claimSite: g.claimSite, claimDeadline: g.claimDeadline,
+            offsetMs: elapsed > 2000 ? elapsed : 0,
+          });
+        }
+      } else if (g.seed) {
+        arena.reveal(g.seed);
+      }
+    }
+  } catch (err) {
+    // Only visible in OBS when something is wrong, so the streamer notices.
+    msg.textContent = 'Hot Potato overlay: ' + err.message;
+    msg.hidden = false;
+  }
+}
+poll();
+setInterval(poll, 1000);
+</script>
+</body>
+</html>
