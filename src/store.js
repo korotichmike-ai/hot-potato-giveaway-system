@@ -8,6 +8,7 @@
 // window ends, a running one becomes done when the animation ends, and done becomes expired
 // when the claim window runs out without a claim.
 import { entrantListHash } from '../public/js/draw.js';
+import { stopChat } from './chat.js';
 
 export const ACTIVE = ['draft', 'open', 'locked', 'running', 'done'];
 export const FINISHED_ROUND = ['done', 'claimed', 'expired'];
@@ -38,11 +39,15 @@ export function toDrawEntrant(e) {
 }
 
 // Freeze the entrant list: hash of eligible entrants, sorted by Kick id, with sub flags.
+// The status flips first; entrant inserts check the status in the same statement, so nobody
+// can slip in between the flip and the hash.
 export async function lockGiveaway(env, g, now) {
+  const res = await env.DB.prepare("UPDATE giveaways SET status = 'locked', locked_at = ? WHERE id = ? AND status = 'open'").bind(now, g.id).run();
+  if (res.meta.changes !== 1) return false;
   const hash = await entrantListHash(eligible(await listEntrants(env, g.id)).map(toDrawEntrant));
-  const res = await env.DB.prepare("UPDATE giveaways SET status = 'locked', locked_at = ?, entrant_hash = ? WHERE id = ? AND status = 'open'")
-    .bind(now, hash, g.id).run();
-  return res.meta.changes === 1;
+  await env.DB.prepare('UPDATE giveaways SET entrant_hash = ? WHERE id = ?').bind(hash, g.id).run();
+  await stopChat(env);
+  return true;
 }
 
 // Apply any time-based transitions and return the fresh row.

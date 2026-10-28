@@ -2,21 +2,149 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
 <title>Hot Potato Claim</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bungee&family=Figtree:wght@400;600&display=swap">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bungee&family=Figtree:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
 <style>
-  :root { color-scheme: dark; --ink:#0e1517; --deck:#162124; --rule:#26363a; --fg:#eef3f1; --muted:#93a6a3; --ember:#ff8a3d; }
-  body { margin:0; background:var(--ink); color:var(--fg); font:16px/1.55 "Figtree", system-ui, sans-serif; }
-  main { max-width:480px; margin:0 auto; padding:48px max(16px, env(safe-area-inset-right, 0px)) 48px max(16px, env(safe-area-inset-left, 0px)); display:grid; gap:16px; }
-  h1 { font:400 30px/1.1 "Bungee", "Arial Black", sans-serif; margin:0; } h1 span { color:var(--ember); }
-  p { margin:0; color:var(--muted); }
+/* Layout: one narrow column, phone first. The single card changes with the claim state. Single dark theme. */
+:root{
+  color-scheme: dark;
+  --ink:#0e1517; --deck:#162124; --rule:#26363a; --fg:#eef3f1; --muted:#93a6a3;
+  --ember:#ff8a3d; --gold:#f3c14b; --clover:#5fd47a; --bad:#ff6b6b;
+  --f-display:"Bungee","Arial Black",Impact,sans-serif;
+  --f-body:"Figtree",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{background:var(--ink)}
+body{margin:0;background:var(--ink);color:var(--fg);font:17px/1.55 var(--f-body);padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+main{max-width:480px;margin:0 auto;padding-block:40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:18px}
+h1{font:400 30px/1.1 var(--f-display);margin:0}
+h1 span{color:var(--ember)}
+h2{font:400 24px/1.15 var(--f-display);margin:0;text-wrap:balance}
+p{margin:0}
+.card{background:var(--deck);border:1px solid var(--rule);border-radius:14px;padding:20px;display:grid;gap:14px}
+.muted{color:var(--muted)}
+.err{color:var(--bad);font-weight:600}
+.btn{display:flex;align-items:center;justify-content:center;width:100%;min-height:56px;border-radius:12px;border:1px solid var(--ember);background:var(--ember);color:#1b0d03;font:700 18px var(--f-body);text-decoration:none;cursor:pointer;padding:12px 18px}
+.btn.ghost{background:transparent;color:var(--fg);border-color:var(--rule);font-weight:600;font-size:15px;min-height:44px}
+.btn:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.timer{font:600 48px/1 var(--f-mono);font-variant-numeric:tabular-nums;color:var(--clover)}
+.timer.low{color:var(--ember)}
+.hold{position:relative;overflow:hidden;user-select:none;-webkit-user-select:none;touch-action:none;background:var(--gold);border-color:var(--gold)}
+.hold .fill{position:absolute;inset:0;width:0;background:rgba(255,255,255,.45)}
+.hold span{position:relative}
+.prize{font:500 15px/1.5 var(--f-mono);background:var(--ink);border:1px solid var(--clover);border-radius:10px;padding:14px;overflow-wrap:anywhere;color:var(--fg)}
+.prize a{color:var(--clover)}
+.warn{color:var(--gold);font-weight:600}
 </style>
 </head>
 <body>
 <main>
   <h1>Hot Potato <span>Claim</span></h1>
-  <p>Won a giveaway? Prize claiming with your Kick account is being built and will open here soon.</p>
+  <section class="card" id="card" aria-live="polite"><p class="muted">Loading…</p></section>
+  <p class="err" id="err" hidden></p>
 </main>
+
+<script type="module">
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const mmss = ms => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+let state = null, offset = 0, revealed = null, sig = '';
+const now = () => Date.now() + offset;
+
+const params = new URLSearchParams(location.search);
+if (params.get('error')) { $('err').textContent = params.get('error'); $('err').hidden = false; history.replaceState(null, '', location.pathname); }
+
+const loginBtn = (label = 'Log in with Kick') => `<a class="btn" href="/api/auth/login?role=winner">${label}</a>`;
+
+function view() {
+  const u = state.user, g = state.giveaway;
+  if (revealed) {
+    const isUrl = /^https?:\/\//i.test(revealed);
+    return `<h2>Your prize 🎉</h2>
+      <div class="prize">${isUrl ? `<a href="${esc(revealed)}" target="_blank" rel="noopener noreferrer">${esc(revealed)}</a>` : esc(revealed)}</div>
+      <button class="btn" id="copy">Copy</button>
+      <p class="warn">This is the only time it is shown. Save it somewhere now.</p>`;
+  }
+  if (!u) return `<h2>Won a giveaway?</h2><p class="muted">Log in with the Kick account you entered with. Only the winner's account can open the prize.</p>${loginBtn()}`;
+  const who = `<p class="muted">Logged in as <b>${esc(u.username)}</b>.</p>`;
+  const switchBtn = '<button class="btn ghost" id="switch">Use a different Kick account</button>';
+  if (!g) return `<h2>No giveaway right now</h2>${who}<p class="muted">When a round ends, the winner can claim here.</p>`;
+  if (g.status === 'running') return `<h2>The round is still playing</h2>${who}<p class="muted">Keep this page open. If you win, the claim button appears here when the winner card shows on stream.</p>`;
+  if (g.status === 'claimed') return `<h2>Prize claimed</h2>${who}<p class="muted">${esc(g.winnerName || 'The winner')} has already claimed this prize.</p>`;
+  if (g.status === 'expired') return `<h2>Claim time ran out</h2>${who}<p class="muted">The prize goes to a reroll. If the reroll picks you, you can claim it here.</p>`;
+  if (!g.isWinner) return `<h2>Not this time</h2>${who}<p class="muted">${esc(g.winnerName)} won this round.</p>${switchBtn}`;
+  return `<h2>You won! 🎉</h2>${who}
+    <p class="muted">Claim before the timer runs out:</p>
+    <div class="timer" id="timer">${mmss(g.claimDeadline - now())}</div>
+    <button class="btn hold" id="hold" aria-describedby="holdhint"><span class="fill" id="fill"></span><span>Hold to reveal your prize</span></button>
+    <p class="muted" id="holdhint">Press and hold for about a second. The prize is shown once, so have somewhere to save it.</p>`;
+}
+
+function render() {
+  const g = state?.giveaway;
+  const next = JSON.stringify([!!revealed, state?.user?.userId, g?.id, g?.status, g?.isWinner]);
+  if (next === sig) return;
+  sig = next;
+  $('card').innerHTML = view();
+  if ($('switch')) $('switch').onclick = async () => { await fetch('/api/auth/logout', { method: 'POST', headers: { 'x-hp': '1' } }); location.href = '/api/auth/login?role=winner'; };
+  if ($('copy')) $('copy').onclick = async () => { try { await navigator.clipboard.writeText(revealed); $('copy').textContent = 'Copied'; } catch { $('copy').textContent = 'Select the text above to copy it'; } };
+  if ($('hold')) wireHold($('hold'));
+}
+
+function wireHold(btn) {
+  let raf = 0, start = 0;
+  const fill = $('fill'), HOLD_MS = 1100;
+  const stop = () => { cancelAnimationFrame(raf); start = 0; fill.style.width = '0'; };
+  const tick = t => {
+    const p = Math.min(1, (t - start) / HOLD_MS);
+    fill.style.width = (p * 100) + '%';
+    if (p >= 1) { stop(); reveal(); } else raf = requestAnimationFrame(tick);
+  };
+  const begin = e => { e.preventDefault(); if (start) return; start = performance.now(); raf = requestAnimationFrame(tick); };
+  btn.addEventListener('pointerdown', begin);
+  btn.addEventListener('keydown', e => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) begin(e); });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => btn.addEventListener(ev, stop));
+  btn.addEventListener('keyup', stop);
+}
+
+async function reveal() {
+  $('err').hidden = true;
+  try {
+    const res = await fetch('/api/claim/reveal', { method: 'POST', headers: { 'x-hp': '1' } });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(d.error || 'Could not reveal the prize. Try again.');
+    revealed = d.prize;
+    render();
+  } catch (e) {
+    $('err').textContent = e.message; $('err').hidden = false;
+    load();
+  }
+}
+
+async function load() {
+  if (revealed) return;
+  try {
+    const res = await fetch('/api/claim/state', { cache: 'no-store' });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error || 'The server did not respond.');
+    offset = d.now - Date.now(); state = d; render();
+  } catch (e) {
+    $('err').textContent = e.message; $('err').hidden = false;
+  }
+}
+
+setInterval(() => {
+  const g = state?.giveaway, el = $('timer');
+  if (el && g) { const left = g.claimDeadline - now(); el.textContent = mmss(left); el.classList.toggle('low', left < 30000); }
+}, 250);
+load();
+setInterval(() => { if (document.visibilityState === 'visible') load(); }, 2000);
+</script>
 </body>
 </html>

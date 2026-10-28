@@ -1,5 +1,5 @@
-// Entry rules (plan section 5). The Kick chat webhook (phase 4) calls addEntrant for every
-// "!join"; the test-entrant button in the host panel uses the same path.
+// Entry rules (plan section 5). The Kick chat webhook calls addEntrant for every "!join";
+// the test-entrant button in the host panel uses the same path.
 
 // Returns null to accept, or a reason shown only in the host panel.
 async function rejectionReason(env, user, now) {
@@ -10,22 +10,23 @@ async function rejectionReason(env, user, now) {
   return user.rejectReason || null;
 }
 
-function ignored(env, user) {
-  if (env.BROADCASTER_USER_ID && user.id === String(env.BROADCASTER_USER_ID)) return true;
+function ignored(env, user, broadcasterId) {
+  if (broadcasterId && user.id === String(broadcasterId)) return true;
   const block = String(env.BLOCKLIST || '').toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
   return block.includes(user.id) || block.includes(String(user.username).toLowerCase());
 }
 
 // user: { id, username, avatarUrl, isSub }. Returns 'added' | 'duplicate' | 'closed' | 'ignored'.
-export async function addEntrant(env, g, user, now = Date.now()) {
+export async function addEntrant(env, g, user, now = Date.now(), { broadcasterId } = {}) {
   if (g.status !== 'open' || now >= g.entries_close_at) return 'closed';
   if (!/^\d+$/.test(String(user.id))) return 'ignored';
   user = { ...user, id: String(user.id) };
-  if (ignored(env, user)) return 'ignored';
+  if (ignored(env, user, broadcasterId)) return 'ignored';
   const reason = await rejectionReason(env, user, now);
   const res = await env.DB.prepare(
-    'INSERT OR IGNORE INTO entrants (giveaway_id, kick_user_id, username, avatar_url, is_sub, rejected_reason, joined_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-  ).bind(g.id, user.id, String(user.username).slice(0, 40), user.avatarUrl || null, user.isSub ? 1 : 0, reason, now).run();
+    `INSERT OR IGNORE INTO entrants (giveaway_id, kick_user_id, username, avatar_url, is_sub, rejected_reason, joined_at)
+     SELECT ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM giveaways WHERE id = ? AND status = 'open' AND entries_close_at > ?)`
+  ).bind(g.id, user.id, String(user.username).slice(0, 40), user.avatarUrl || null, user.isSub ? 1 : 0, reason, now, g.id, now).run();
   return res.meta.changes === 1 ? 'added' : 'duplicate';
 }
 
